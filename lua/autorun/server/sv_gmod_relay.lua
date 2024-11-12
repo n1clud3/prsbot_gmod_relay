@@ -1,7 +1,10 @@
 local addon_name = "prsbot_gmod_relay"
 local wsMethods = {
+    PlayerSpawn = "prsbotPlayerSpawn",
+    PlayerLeave = "prsbotPlayerLeave",
     AvatarFetch = "prsbotAvatarFetch",
-    MessageSend = "prsbotMessageSend"
+    MessageSend = "prsbotMessageSend",
+    StatusCmd = "prsbotStatusCmd",
 }
 
 local function websocket_mode()
@@ -16,31 +19,64 @@ local function websocket_mode()
     end
 
     function ws:onConnected()
-        print("[PrsBot Gmod Relay] websocket successfully connected!")
-        gameevent.Listen("player_say")
-        hook.Add("player_say", addon_name, function(data)
-            print("[PrsBot Gmod Relay] sending websocket message")
-            if (data.teamonly == 0) then
-                local ply = Player(data.userid)
+        print("[PrsBot Gmod Relay] WS successfully connected!")
+        hook.Remove("PlayerSay", "ZZZ" .. addon_name)
+        hook.Add("PlayerSay", "ZZZ" .. addon_name, function(ply, text, teamchat)
+            print("[PrsBot Gmod Relay] sending WS message", wsMethods.MessageSend)
+            if (not teamchat) then
                 local payload = wsMethods.AvatarFetch .. util.TableToJSON({
                     plyname = ply:Nick(),
                     plysteamid = ply:SteamID64(),
-                    plymsg = data.text
+                    plymsg = text
                 })
                 ws:write(payload)
             end
+        end)
+
+        hook.Remove("PlayerInitialSpawn", addon_name)
+        hook.Add("PlayerInitialSpawn", addon_name, function(ply)
+            local payload = wsMethods.PlayerSpawn .. util.TableToJSON({
+                plyname = ply:Nick(),
+                plysteamid = ply:SteamID(),
+                plysteamid64 = ply:SteamID64()
+            })
+            ws:write(payload)
+        end)
+
+        hook.Remove("PlayerDisconnected", addon_name)
+        hook.Add("PlayerDisconnected", addon_name, function(ply)
+            local payload = wsMethods.PlayerLeave .. util.TableToJSON({
+                plyname = ply:Nick(),
+                plysteamid = ply:SteamID(),
+                plysteamid64 = ply:SteamID64()
+            })
+            ws:write(payload)
         end)
     end
 
     function ws:onMessage(msg)
         if (string.StartsWith(msg, wsMethods.MessageSend)) then
-            local chatmsg = "[discord] " .. string.sub(msg, string.len(wsMethods.MessageSend) + 1)
-            PrintMessage(HUD_PRINTTALK, chatmsg)
+            net.Start("prsbotDiscordMsg")
+            local chatmsg = string.sub(msg, string.len(wsMethods.MessageSend) + 1)
+            net.WriteString(chatmsg)
+            net.Broadcast()
+        elseif (string.StartsWith(msg, wsMethods.StatusCmd)) then
+            local payload = {}
+            payload.hostname = GetHostName()
+            payload.ipaddr = game.GetIPAddress()
+            payload.maxplys = game.MaxPlayers()
+            payload.curmap = game.GetMap()
+            payload.players = {}
+            for _, ply in ipairs(player.GetHumans()) do
+                table.insert(payload.players, ply:Nick())
+            end
+            PrintTable(payload)
+            ws:write(wsMethods.StatusCmd .. util.TableToJSON(payload))
         end
     end
 
-
     hook.Add("Initialize", addon_name, function()
+        util.AddNetworkString("prsbotDiscordMsg")
         ws:closeNow()
         ws:open()
         print("[PrsBot Gmod Relay] Opened connection to bot.")
