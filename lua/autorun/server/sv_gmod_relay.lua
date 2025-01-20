@@ -1,6 +1,7 @@
 local addon_name = "prsbot_gmod_relay"
 local wsMethods = {
     PlayerSpawn = "prsbotPlayerSpawn",
+    PlayerConnect = "prsbotPlayerConnect",
     PlayerLeave = "prsbotPlayerLeave",
     AvatarFetch = "prsbotAvatarFetch",
     MessageSend = "prsbotMessageSend",
@@ -31,6 +32,14 @@ local function websocket_mode()
                 })
                 ws:write(payload)
             end
+        end)
+
+        hook.Remove("PlayerConnect", addon_name)
+        hook.Add("PlayerConnect", addon_name, function(name, ip)
+            local payload = wsMethods.PlayerConnect .. util.TableToJSON({
+                plyname = name
+            })
+            ws:write(payload)
         end)
 
         hook.Remove("PlayerInitialSpawn", addon_name)
